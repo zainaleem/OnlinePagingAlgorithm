@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Online Paging Algorithm</title>
+
+  <!-- Bootstrap CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      background: #f8f9fa;
+      font-family: "Segoe UI", sans-serif;
+      margin: 20px;
+    }
+    .card {
+      border-radius: 15px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .chart-container {
+      position: relative;
+      height: 250px;
+      width: 100%;
+    }
+    .trace-box {
+      background: #f1f3f5;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .summary-chart {
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="text-center mt-3 mb-4">Online Paging Algorithm</h2>
+
+    <div class="card p-4">
+      <form id="compareForm">
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Min Cache Capacity</label>
+            <input type="number" class="form-control" name="min_capacity" required />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Max Cache Capacity</label>
+            <input type="number" class="form-control" name="max_capacity" required />
+          </div>
+          <div class="col-md-12 mt-3">
+            <label class="form-label">Enter URLs (comma or space-separated)</label>
+            <input type="text" class="form-control" name="urls" required />
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Compare</button>
+      </form>
+    </div>
+
+    <div id="results" class="mt-4"></div>
+
+    <div class="summary-chart" id="summary-container" style="display:none;">
+      <h4 class="text-center">Hit Ratio vs Cache Size</h4>
+      <div class="chart-container">
+        <canvas id="summaryChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+ <script>
+  let summaryChartInstance = null; // store global chart instance
+
+  document.getElementById("compareForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+      min_capacity: parseInt(form.min_capacity.value),
+      max_capacity: parseInt(form.max_capacity.value),
+      urls: form.urls.value
+    };
+
+    const response = await fetch("/compare_fifo", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(data)
+    });
+    const result = await response.json();
+    const container = document.getElementById("results");
+    container.innerHTML = "";
+
+    const results = result.comparative_results;
+    const labels = [];
+    const hitRatios = [];
+
+    for (const [cap, res] of Object.entries(results)) {
+      const card = document.createElement("div");
+      card.classList.add("card", "p-3");
+
+      card.innerHTML = `
+        <h5>Cache Capacity: ${res.cache_size}</h5>
+        <p><strong>Cache Hits:</strong> ${res.cache_hits}</p>
+        <p><strong>Cache Misses:</strong> ${res.cache_misses}</p>
+        <p><strong>Hit Ratio:</strong> ${res.hit_ratio}</p>
+        <p><strong>Miss Ratio:</strong> ${res.miss_ratio}</p>
+        <div class="chart-container"><canvas id="chart-${cap}"></canvas></div>
+        <button class="btn btn-sm btn-outline-secondary mt-3" 
+          data-bs-toggle="collapse" data-bs-target="#trace-${cap}">
+          Show Trace
+        </button>
+        <div class="collapse mt-2" id="trace-${cap}">
+          <div class="trace-box">${res.trace.join("\n")}</div>
+        </div>
+      `;
+
+      container.appendChild(card);
+
+      // Draw bar chart (Hits vs Misses)
+      const ctx = document.getElementById(`chart-${cap}`);
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: ["Hits", "Misses"],
+          datasets: [
+            {
+              label: "Count",
+              data: [res.cache_hits, res.cache_misses],
+              backgroundColor: ["#4caf50", "#f44336"],
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            title: { display: true, text: `Cache Size ${res.cache_size}` },
+          },
+        },
+      });
+
+      // Collect for summary chart
+      labels.push(res.cache_size);
+      hitRatios.push(res.hit_ratio);
+    }
+
+    // Destroy old summary chart if it exists
+    if (summaryChartInstance) {
+      summaryChartInstance.destroy();
+    }
+
+    // Draw combined summary chart
+    if (labels.length > 0) {
+      document.getElementById("summary-container").style.display = "block";
+      const summaryCtx = document.getElementById("summaryChart");
+      summaryChartInstance = new Chart(summaryCtx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [{
+            label: "Hit Ratio",
+            data: hitRatios,
+            fill: false,
+            borderColor: "#007bff",
+            tension: 0.2,
+            pointBackgroundColor: "#007bff"
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: "Hit Ratio vs Cache Size"
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 1
+            }
+          }
+        }
+      });
+    }
+  });
+</script>
+
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
